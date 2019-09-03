@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="ie=edge">
+  <title>Document</title>
+  <style>
+  .circ {
+    fill: #D35400;
+    opacity: 0.1;
+    stroke: rgba(211, 84, 0, 0.7);
+    stroke-width: 5px;
+}
+</style>
+</head>
+<body>
+  <div class="timeseries"></div>
+
+  <script src="../tweets.js"></script>
+  <script src="https://d3js.org/d3.v5.js"></script>
+  <script>
+data.forEach(point => {
+  point.value = new Date(point.created_at).getTime()
+})
+margin = ({top: 20, right: 20, bottom: 30, left: 20})
+padding = 1.5
+radius = 2
+height = 700
+width = 700
+xAxis = g => g
+  .attr("transform", `translate(0,${height - margin.bottom})`)
+  .call(d3.axisBottom(x).tickSizeOuter(0))
+x = d3.scaleLinear()
+  .domain(d3.extent(data, d => d.value))
+  .range([margin.left, width - margin.right])
+  dodge = (data, radius) => {
+  const radius2 = radius ** 2;
+  const circles = data.map(d => ({x: x(d.value), data: d})).sort((a, b) => a.x - b.x);
+  const epsilon = 1e-3;
+  let head = null, tail = null;
+
+  // Returns true if circle ⟨x,y⟩ intersects with any circle in the queue.
+  function intersects(x, y) {
+    let a = head;
+    while (a) {
+      if (radius2 - epsilon > (a.x - x) ** 2 + (a.y - y) ** 2) {
+        return true;
+      }
+      a = a.next;
+    }
+    return false;
+  }
+
+  // Place each circle sequentially.
+  for (const b of circles) {
+
+    // Remove circles from the queue that can’t intersect the new circle b.
+    while (head && head.x < b.x - radius2) head = head.next;
+
+    // Choose the minimum non-intersecting tangent.
+    if (intersects(b.x, b.y = 0)) {
+      let a = head;
+      b.y = Infinity;
+      do {
+        let y = a.y + Math.sqrt(radius2 - (a.x - b.x) ** 2);
+        if (y < b.y && !intersects(b.x, y)) b.y = y;
+        a = a.next;
+      } while (a);
+    }
+
+    // Add b to the queue.
+    b.next = null;
+    if (head === null) head = tail = b;
+    else tail = tail.next = b;
+  }
+
+  return circles;
+}
+chart = () => {
+  var bodySelection = d3.select("body");
+  var svg = bodySelection.append("svg")
+                                 .attr("width", 700)
+                                 .attr("height", 700);
+
+  svg.append("g")
+      .call(xAxis);
+
+  svg.append("g")
+    .selectAll("circle")
+    .data(dodge(data, radius * 2 + padding))
+    .enter().append("circle")
+      .attr("cx", d => d.x)
+      .attr("cy", d => height - margin.bottom - radius - padding - d.y)
+      .attr("r", d => {
+        const count = d.data.retweet_count + d.data.favorite_count;
+        // if (count = 0) {
+          return radius;
+        // }
+      })
+    .append("title")
+      .text(d => d.data.name);
+
+  return svg.node();
+}
+chart();
+  </script>
+</body>
+</html>

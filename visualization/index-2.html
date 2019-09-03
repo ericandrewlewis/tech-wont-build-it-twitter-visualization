@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<head>
+    <meta charset="utf-8">
+    <style>
+    svg {
+      font: 10px sans-serif;
+    }
+    .x.axis .domain {
+      fill: none;
+      stroke: #000;
+      shape-rendering: crispEdges;
+    }
+    .tweet-detail {
+      width: 300px;
+      background-color: white;
+      padding: 20px;
+    }
+    </style>
+    <script src="../tweets.js"></script>
+</head>
+<body>
+<script src="https://d3js.org/d3.v3.min.js"></script>
+<script>
+
+var margin = {top: 50, right: 50, bottom: 50, left: 50},
+    width = 960 - margin.left - margin.right,
+    height = 500 - margin.top - margin.bottom,
+    // padding between nodes
+    padding = 2,
+    maxRadius = 12,
+    numberOfNodes = 50;
+
+// Create random node data.
+// var data = d3.range(numberOfNodes).map(function() {
+//   var value = Math.floor(Math.random() * 50) / 10,
+//       size = Math.floor( Math.sqrt((value + 1) / numberOfNodes * -Math.log(Math.random())) * maxRadius * 10 ),
+//       datum = {value: value, size: size};
+//   return datum;
+// });
+
+const min = Math.min(...data.map(data => new Date(data.created_at).getTime()));
+const max = Math.max(...data.map(data => new Date(data.created_at).getTime()));
+
+var x = d3.scale.linear()
+  .domain( [min, max] )
+  .range( [margin.left, width + margin.right ] );
+
+// Map the basic node data to d3-friendly format.
+var nodes = data.map(function(node, index) {
+  let idealRadius;
+  let interactionsCount = node.retweet_count + node.favorite_count;
+  if (interactionsCount == 0) {
+    idealRadius = 4;
+  } else if (interactionsCount < 10 ) {
+    idealRadius = 5;
+  } else if (interactionsCount < 100 ) {
+    idealRadius = 6;
+  } else if (interactionsCount < 1000 ) {
+    idealRadius = 8;
+  } else if (interactionsCount < 10000 ) {
+    idealRadius = 10;
+  } else {
+    idealRadius = 12;
+  }
+
+  const unixTimestamp = new Date(node.created_at).getTime()
+
+  return {
+    idealradius: idealRadius,
+    radius: 0,
+    // Give each node a random color.
+    color: '#ff7f0e',
+    // Set the node's gravitational centerpoint.
+    idealcx: x(unixTimestamp),
+    idealcy: height / 2,
+    x: x(unixTimestamp),
+    // Add some randomization to the placement;
+    // nodes stacked on the same point can produce NaN errors.
+    y: height / 2 + Math.random(),
+    ...node
+  };
+});
+nodes = nodes.filter((el, index) => el.full_text.indexOf('#TechWontBuildIt') >= 0);
+// nodes = nodes.filter((el, index) => index < 100);
+
+var force = d3.layout.force()
+  .nodes(nodes)
+  .size([width, height])
+  .gravity(0)
+  .charge(0)
+  .on("tick", tick)
+  .start();
+
+var xAxis = d3.svg.axis()
+  .scale(x);
+
+var svg = d3.select("body").append("svg")
+  .attr("width", width + margin.left + margin.right)
+  .attr("height", height + margin.top + margin.bottom);
+
+var loading = svg.append("text")
+  .attr("x", ( width + margin.left + margin.right ) / 2)
+  .attr("y", ( height + margin.top + margin.bottom ) / 2)
+  .attr("dy", ".35em")
+  .style("text-anchor", "middle")
+  .text("Simulating. One moment please…");
+
+/**
+ * On a tick, apply custom gravity, collision detection, and node placement.
+ */
+function tick(e) {
+  for ( i = 0; i < nodes.length; i++ ) {
+    var node = nodes[i];
+    /*
+     * Animate the radius via the tick.
+     *
+     * Typically this would be performed as a transition on the SVG element itself,
+     * but since this is a static force layout, we must perform it on the node.
+     */
+    node.radius = node.idealradius - node.idealradius * e.alpha * 10;
+    node = gravity(.2 * e.alpha)(node);
+    node = collide(.5)(node);
+    node.cx = node.x;
+    node.cy = node.y;
+  }
+}
+
+/**
+ * On a tick, move the node towards its desired position,
+ * with a preference for accuracy of the node's x-axis placement
+ * over smoothness of the clustering, which would produce inaccurate data presentation.
+ */
+function gravity(alpha) {
+  return function(d) {
+    d.y += (d.idealcy - d.y) * alpha;
+    d.x += (d.idealcx - d.x) * alpha * 3;
+    return d;
+  };
+}
+
+/**
+ * On a tick, resolve collisions between nodes.
+ */
+function collide(alpha) {
+  var quadtree = d3.geom.quadtree(nodes);
+  return function(d) {
+    var r = d.radius + maxRadius + padding,
+        nx1 = d.x - r,
+        nx2 = d.x + r,
+        ny1 = d.y - r,
+        ny2 = d.y + r;
+    quadtree.visit(function(quad, x1, y1, x2, y2) {
+      if (quad.point && (quad.point !== d)) {
+        var x = d.x - quad.point.x,
+            y = d.y - quad.point.y,
+            l = Math.sqrt(x * x + y * y),
+            r = d.radius + quad.point.radius + padding;
+        if (l < r) {
+          l = (l - r) / l * alpha;
+          d.x -= x *= l;
+          d.y -= y *= l;
+          quad.point.x += x;
+          quad.point.y += y;
+        }
+      }
+      return x1 > nx2 || x2 < nx1 || y1 > ny2 || y2 < ny1;
+    });
+    return d;
+  };
+}
+
+function displayBox(d) {
+  removeBox();
+  const el = document.createElement('div');
+  el.className = 'tweet-detail'
+  el.style.position = 'absolute';
+  el.style.top = (d.y + 10) + 'px';
+  el.style.left = d.x + 'px';
+  const date = new Date(d.created_at);
+  el.innerHTML = `
+    <p><img src="${d.user_profile_image}">${d.user}</p>
+    <p>${d.full_text.substr(d.display_text_range[0], d.display_text_range[1] - d.display_text_range[0])}</p>
+    <p>${date.getMonth() + 1}/${date.getDate() + 1}/${date.getFullYear()}</p>
+  `;
+  document.body.appendChild(el);
+}
+
+function removeBox() {
+  const el = document.querySelector('.tweet-detail');
+  if (el) {
+    el.remove();
+  }
+}
+/**
+ * Run the force layout to compute where each node should be placed,
+ * then replace the loading text with the graph.
+ */
+function renderGraph() {
+  // Run the layout a fixed number of times.
+  // The ideal number of times scales with graph complexity.
+  // Of course, don't run too long—you'll hang the page!
+  force.start();
+  for (var i = 80; i > 0; --i) force.tick();
+  force.stop();
+
+  svg.append("g")
+    .attr("class", "x axis")
+    .attr("transform", "translate(0," + ( margin.top + ( height * 3/4 ) ) + ")")
+    .call(xAxis);
+
+  var circle = svg.selectAll("circle")
+    .data(nodes)
+  .enter().append("circle")
+    .style("fill", function(d) {
+      let color = '#' + d.profile_link_color;
+      if (color == '#000000' ) {
+        color = '#555555';
+      }
+      return color;
+    })
+    .attr("cx", function(d) { return d.x} )
+    .attr("cy", function(d) { return d.y} )
+    .attr("r", function(d) { return d.radius} )
+    .on('mouseover', d => {
+      displayBox(d);
+    })
+    .on('mouseout', d => {
+      // removeBox();
+    })
+
+  loading.remove();
+}
+// Use a timeout to allow the rest of the page to load first.
+setTimeout(renderGraph, 10);
+
+</script>
